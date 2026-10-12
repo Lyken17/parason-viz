@@ -95,16 +95,18 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 .line.live{background:color-mix(in oklab,var(--sub) 10%,var(--surface))}
 .trials{display:flex;flex-direction:column;gap:6px;border-left:2px solid var(--trial);padding-left:10px;margin-left:2px}
 .trial-lab{font:600 10px var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--trial)}
-.trial{--cur:var(--trial);display:grid;grid-template-columns:4.4em minmax(0,1fr) auto;column-gap:10px;align-items:baseline;border:1px solid var(--line);border-radius:7px;padding:6px 8px 5px;transition:border-color .2s,box-shadow .2s,background-color .2s}
+.trial{--cur:var(--trial);display:grid;grid-template-columns:4.4em minmax(0,1fr) auto;column-gap:10px;align-items:baseline;border:1px solid var(--line);border-radius:7px;padding:6px 8px 5px;transition:border-color .2s,box-shadow .2s,background-color .2s,opacity .3s}
 .tgoal{font:600 12px var(--f-mono);color:var(--trial);white-space:nowrap;transition:opacity .25s}
 .trial .txt{font-size:12px;min-height:1.5em}
 .badge{font:600 11px var(--f-mono);white-space:nowrap}
 .trial .bar{grid-column:1/-1;height:2px;margin-top:4px;border-radius:1px;background:color-mix(in oklab,var(--trial) 14%,var(--surface));overflow:hidden}
 .trial .bar i{display:block;height:100%;width:0;background:var(--trial)}
 .trial.live{border-color:var(--trial);box-shadow:0 0 0 3px color-mix(in oklab,var(--trial) 16%,transparent)}
-.trial.dead.done .txt{color:var(--muted)}
-.trial.dead.done .badge{color:var(--fail)}
-.trial.hit.done{border-color:color-mix(in oklab,var(--trial) 60%,var(--line))}
+.trial.dead.done{opacity:.45}
+.trial.dead.done .tgoal,.trial.dead.done .txt,.trial.dead.done .badge{color:var(--muted)}
+.trial.dead.done .bar i{background:var(--muted)}
+.trial.hit.done{border-color:var(--trial);background:color-mix(in oklab,var(--trial) 12%,var(--surface));box-shadow:0 0 0 3px color-mix(in oklab,var(--trial) 22%,transparent)}
+.trial.hit.done .txt{color:var(--ink);font-weight:600}
 .trial.hit.done .badge{color:var(--trial)}
 .slots{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
 .slot{font:500 12px var(--f-mono);padding:2px 8px;border-radius:5px;border:1px dashed var(--line);color:var(--muted)}
@@ -240,8 +242,8 @@ const LEAVES = {
   comb:   {len:12, kind:"think", label:"Final conclusion",            text:"a^b + b^a = 2^3 + 3^2 = 8 + 9 = 17."},
 };
 const SUBS = {
-  1:{goal:"real root a of x³ − 2x − 4 = 0", trials:["t11","t12","t13","t14","t15"], slot:["a = ?","a = 2"]},
-  2:{goal:"real root b of x³ + x − 30 = 0", trials:["t21","t22","t23","t24","t25"], slot:["b = ?","b = 3"]},
+  1:{goal:"real root a of x³ − 2x − 4 = 0", trials:["t15","t12","t14","t13","t11"], slot:["a = ?","a = 2"]},  // x = 4, −1, −2, 2 ✓, 1
+  2:{goal:"real root b of x³ + x − 30 = 0", trials:["t24","t23","t25","t21","t22"], slot:["b = ?","b = 3"]},  // x = 5, 3 ✓, 6, 1, 2
 };
 const L = k => ({leaf:k});
 const TRACE = {seq:[
