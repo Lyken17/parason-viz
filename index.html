@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="One problem that uses both Subtask (AND) and Trial (OR) parallelism from the Parason paper, animated as a fork-join trace with an ablation of which forks run concurrently.">
+<title>Subtask vs Trial Parallelism</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+html,body{margin:0}
+/* Layout: one trace drawn as a fork–join tree (two Subtask columns, each holding a Trial fork), then a four-row Gantt ablation on one shared token axis. */
+:root{
+  --bg:#F3F5F8; --surface:#FFFFFF; --ink:#161A22; --muted:#5A6272; --line:#D8DDE6; --grid:#ECEFF4;
+  --sub:#2F63D8; --trial:#1C8656; --fail:#C0463B; --neutral:#8C95A5;
+  --f-display:"Bricolage Grotesque","Avenir Next",system-ui,sans-serif;
+  --f-body:"IBM Plex Sans",system-ui,-apple-system,sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0F1217; --surface:#171B23; --ink:#E6E9EF; --muted:#9BA3B2; --line:#2B313C; --grid:#1E232C;
+  --sub:#7AA2FF; --trial:#46C28B; --fail:#F07B6F; --neutral:#677083; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0F1217; --surface:#171B23; --ink:#E6E9EF; --muted:#9BA3B2; --line:#2B313C; --grid:#1E232C;
+  --sub:#7AA2FF; --trial:#46C28B; --fail:#F07B6F; --neutral:#677083; color-scheme:dark}
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:15px/1.5 var(--f-body);padding-inline:16px;padding-block:28px 48px}
+.wrap{max-width:980px;margin:0 auto;display:flex;flex-direction:column;gap:22px}
+h1,h2,h3{font-family:var(--f-display);text-wrap:balance;margin:0;letter-spacing:-.01em}
+h1{font-size:clamp(26px,4.4vw,38px);font-weight:700;line-height:1.1}
+h2{font-size:21px;font-weight:700}
+.lede{color:var(--muted);max-width:70ch;margin:8px 0 0}
+.lede a{color:inherit}
+.s{color:var(--sub);font-weight:600} .t{color:var(--trial);font-weight:600}
+sup{font-size:.7em;line-height:0}
+
+/* controls */
+.controls{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;display:flex;flex-wrap:wrap;align-items:center;gap:10px;
+  background:color-mix(in oklab,var(--bg) 88%,transparent);backdrop-filter:blur(8px);padding:10px 0;border-bottom:1px solid var(--line)}
+button,select{font:500 13px var(--f-body);color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:7px;padding:7px 12px;cursor:pointer}
+button:hover,select:hover{border-color:var(--muted)}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--sub);outline-offset:2px}
+#play{min-width:84px;background:var(--ink);color:var(--bg);border-color:var(--ink)}
+#scrub{flex:1 1 160px;min-width:0;accent-color:var(--ink)}
+.clock{font:500 13px var(--f-mono);color:var(--muted);font-variant-numeric:tabular-nums;min-width:9ch;text-align:right}
+
+/* panels */
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:20px;display:flex;flex-direction:column;gap:16px;min-width:0}
+.head{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 10px}
+.head h2{margin-right:4px}
+.gate{font:600 11px var(--f-mono);letter-spacing:.08em;text-transform:uppercase;padding:3px 8px;border-radius:99px}
+.gate.sub{color:var(--sub);background:color-mix(in oklab,var(--sub) 13%,var(--surface))}
+.gate.trial{color:var(--trial);background:color-mix(in oklab,var(--trial) 13%,var(--surface))}
+.blurb{margin:-6px 0 0;color:var(--muted);max-width:72ch}
+.eyebrow{font:600 11px var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-right:8px}
+
+.modebar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px}
+.modes{display:inline-flex;flex-wrap:wrap;gap:3px;padding:3px;border-radius:9px;background:color-mix(in oklab,var(--ink) 6%,var(--surface))}
+.modes button{border:0;background:transparent;padding:6px 11px;border-radius:7px;color:var(--muted)}
+.modes button:hover{color:var(--ink)}
+.modes button[aria-checked="true"]{background:var(--surface);color:var(--ink);font-weight:600;box-shadow:0 1px 3px color-mix(in oklab,var(--ink) 20%,transparent)}
+.pathinfo{font:500 12px var(--f-mono);color:var(--muted);font-variant-numeric:tabular-nums}
+.pathinfo b{color:var(--ink);font-weight:600}
+
+/* trace tree */
+.tree{display:flex;flex-direction:column}
+.lab{display:flex;justify-content:space-between;gap:8px;font:500 11px var(--f-mono);color:var(--muted);letter-spacing:.03em}
+.status{font:600 10px var(--f-mono);text-transform:uppercase;letter-spacing:.08em;white-space:nowrap;color:var(--muted)}
+.txt{font:13px/1.5 var(--f-mono);overflow-wrap:anywhere}
+.cur{display:inline-block;width:.5em;height:1em;vertical-align:-2px;margin-left:1px;background:var(--cur);animation:blink 1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+.node{--cur:var(--ink);border:1px solid var(--line);border-radius:9px;padding:10px 12px;align-self:center;width:min(600px,100%);transition:border-color .2s,box-shadow .2s,background-color .2s}
+.node .txt{display:block;margin-top:4px;min-height:1.5em}
+.node.live{border-color:var(--ink);box-shadow:0 0 0 3px color-mix(in oklab,var(--ink) 10%,transparent)}
+
+.fork{position:relative;height:32px}
+.fork::before{content:"";position:absolute;left:50%;height:16px;border-left:1.5px solid var(--sub)}
+.fork.down::before{top:0} .fork.up::before{bottom:0}
+.fork::after{content:"";position:absolute;left:25%;right:25%;height:16px;border:1.5px solid var(--sub)}
+.fork.down::after{bottom:0;border-bottom:0;border-radius:8px 8px 0 0}
+.fork.up::after{top:0;border-top:0;border-radius:0 0 8px 8px}
+.fork span{position:absolute;left:calc(50% + 10px);font:600 10px/16px var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--sub);white-space:nowrap}
+.fork.down span{top:0} .fork.up span{bottom:0}
+
+.subs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.subcard{border:1.5px solid color-mix(in oklab,var(--sub) 30%,var(--line));border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:8px;min-width:0;transition:border-color .2s}
+.subcard.active{border-color:var(--sub)}
+.sub-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.sgoal{font:500 13px var(--f-mono);transition:opacity .25s}
+.tag{font:500 11px var(--f-mono);color:var(--sub)}
+.pending{opacity:.35}
+.line{--cur:var(--sub);font:13px/1.5 var(--f-mono);color:var(--sub);min-height:1.5em;border-radius:5px;padding:1px 5px;margin:0 -5px;transition:background-color .2s}
+.line .tag{color:var(--muted)}
+.line.live{background:color-mix(in oklab,var(--sub) 10%,var(--surface))}
+.trials{display:flex;flex-direction:column;gap:6px;border-left:2px solid var(--trial);padding-left:10px;margin-left:2px}
+.trial-lab{font:600 10px var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--trial)}
+.trial{--cur:var(--trial);display:grid;grid-template-columns:4.4em minmax(0,1fr) auto;column-gap:10px;align-items:baseline;border:1px solid var(--line);border-radius:7px;padding:6px 8px 5px;transition:border-color .2s,box-shadow .2s,background-color .2s}
+.tgoal{font:600 12px var(--f-mono);color:var(--trial);white-space:nowrap;transition:opacity .25s}
+.trial .txt{font-size:12px;min-height:1.5em}
+.badge{font:600 11px var(--f-mono);white-space:nowrap}
+.trial .bar{grid-column:1/-1;height:2px;margin-top:4px;border-radius:1px;background:color-mix(in oklab,var(--trial) 14%,var(--surface));overflow:hidden}
+.trial .bar i{display:block;height:100%;width:0;background:var(--trial)}
+.trial.live{border-color:var(--trial);box-shadow:0 0 0 3px color-mix(in oklab,var(--trial) 16%,transparent)}
+.trial.dead.done .txt{color:var(--muted)}
+.trial.dead.done .badge{color:var(--fail)}
+.trial.hit.done{border-color:color-mix(in oklab,var(--trial) 60%,var(--line))}
+.trial.hit.done .badge{color:var(--trial)}
+.slots{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.slot{font:500 12px var(--f-mono);padding:2px 8px;border-radius:5px;border:1px dashed var(--line);color:var(--muted)}
+.slot.in{border-style:solid;border-color:var(--sub);color:var(--sub)}
+.answer{margin-top:6px;min-height:1.7em;font:600 14px var(--f-mono)}
+.boxed{display:inline-block;border:1.5px solid var(--ink);padding:0 7px;border-radius:3px;margin-left:6px}
+.tree .hl{background:color-mix(in oklab,var(--ink) 7%,var(--surface))}
+
+details.tags summary{cursor:pointer;font:500 12px var(--f-mono);color:var(--muted);width:max-content;max-width:100%}
+details.tags summary:hover{color:var(--ink)}
+details.tags pre{margin:10px 0 0;font:12px/1.55 var(--f-mono);background:color-mix(in oklab,var(--ink) 4%,var(--surface));border-radius:8px;padding:12px 14px;overflow-x:auto}
+.tc{color:var(--muted)} .ts{color:var(--sub)} .tt{color:var(--trial)}
+
+/* ablation */
+.runs{display:flex;flex-direction:column;gap:4px}
+.run{display:flex;flex-direction:column;gap:7px;padding:10px 12px;border-radius:9px;border:1px solid transparent;cursor:pointer;transition:background-color .15s}
+.run:hover{background:color-mix(in oklab,var(--ink) 3%,var(--surface))}
+.run.sel{background:color-mix(in oklab,var(--ink) 5%,var(--surface));border-color:var(--line)}
+.run:focus-visible{outline:2px solid var(--sub);outline-offset:2px}
+.run-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 12px}
+.run-name{font-weight:600;font-size:14px}
+.run-desc{color:var(--muted);font-size:13px;flex:1 1 240px;min-width:0}
+.run-val{font:500 13px var(--f-mono);font-variant-numeric:tabular-nums;color:var(--muted);white-space:nowrap}
+.run-val b{font-weight:600}
+.run.done .run-val{color:var(--ink)}
+.track{position:relative;background-image:linear-gradient(to right,var(--grid) 1px,transparent 1px)}
+.seg{position:absolute;border-radius:3px;overflow:hidden;background:color-mix(in oklab,var(--c) 15%,var(--surface));box-shadow:inset 0 0 0 1px color-mix(in oklab,var(--c) 40%,transparent)}
+.seg i{display:block;height:100%;width:0;background:var(--c)}
+.seg.dead i{background:repeating-linear-gradient(-45deg,var(--c) 0 3px,color-mix(in oklab,var(--c) 40%,var(--surface)) 3px 6px)}
+.seg.crit{box-shadow:0 0 0 1.5px var(--ink);z-index:1}
+.seg.hl{outline:2px solid var(--ink);outline-offset:1px;z-index:2}
+.head-line{position:absolute;top:-3px;bottom:-3px;width:2px;margin-left:-1px;background:var(--ink);border-radius:1px;pointer-events:none;z-index:3}
+.save{position:absolute;top:0;bottom:0;border-left:1.5px dashed var(--muted);display:flex;align-items:center;padding-left:8px;font:500 11px var(--f-mono);color:var(--muted);white-space:nowrap;overflow:hidden}
+.axis{position:relative;height:16px;margin:0 13px;font:10px var(--f-mono);color:var(--muted);font-variant-numeric:tabular-nums}
+.axis span{position:absolute;top:0;transform:translateX(-50%)}
+.axis span:first-child{transform:none}
+.axis-cap{margin:-10px 13px 0;text-align:right;font:10px var(--f-mono);color:var(--muted)}
+.legend{display:flex;flex-wrap:wrap;gap:8px 16px;font:11px var(--f-mono);color:var(--muted);padding:0 13px}
+.legend i{display:inline-block;width:14px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px;background:var(--c)}
+.legend i.dead{background:repeating-linear-gradient(-45deg,var(--trial) 0 3px,color-mix(in oklab,var(--trial) 40%,var(--surface)) 3px 6px)}
+.legend i.crit{background:transparent;box-shadow:inset 0 0 0 1.5px var(--ink)}
+
+.compare{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}
+.compare > div{min-width:0}
+.compare h3{font:600 14px var(--f-body);margin:0 0 4px}
+.compare p{margin:0;color:var(--muted);font-size:14px}
+.compare b{color:var(--ink);font-weight:600}
+.note{font-size:12px;color:var(--muted);margin:0;max-width:80ch}
+
+@media (max-width:640px){
+  .panel{padding:14px}
+  .subs{grid-template-columns:minmax(0,1fr)}
+  .fork::after{display:none}
+  .fork::before{height:100%}
+  .trial{grid-template-columns:3.8em minmax(0,1fr) auto;column-gap:8px}
+  .run{padding:8px}
+  .axis,.axis-cap{margin-inline:9px}
+  .legend{padding:0 9px}
+}
+@media (prefers-reduced-motion:reduce){.cur{animation:none}.node,.trial,.line,.subcard,.run{transition:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>One problem, both kinds of parallelism</h1>
+    <p class="lede">To find a<sup>b</sup> + b<sup>a</sup>, the model needs two roots that don't depend on each other, so it forks into two <span class="s">Subtask</span> threads, and both results are required. Neither root is known in advance, so each subtask forks again into <span class="t">Trial</span> threads that test candidate roots at the same time. One hit is enough, and the dead ends stay in context. Format and terms follow the <a href="https://arxiv.org/html/2608.24658" target="_blank" rel="noopener">Parason paper</a>.</p>
+  </header>
+
+  <div class="controls" role="group" aria-label="Playback">
+    <button id="play" type="button">Pause</button>
+    <button id="restart" type="button">Restart</button>
+    <select id="speed" aria-label="Speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select>
+    <input id="scrub" type="range" min="0" max="1000" value="0" aria-label="Timeline position">
+    <span class="clock" id="clock">t = 0 tok</span>
+  </div>
+
+  <section class="panel">
+    <div class="head"><h2>The trace</h2><span class="gate sub">Subtask · AND</span><span class="gate trial">Trial · OR</span></div>
+    <div><span class="eyebrow">Problem</span>Let <i>a</i> be the real root of x³ − 2x − 4 = 0 and <i>b</i> the real root of x³ + x − 30 = 0. Find <i>a</i><sup><i>b</i></sup> + <i>b</i><sup><i>a</i></sup>.</div>
+    <div class="modebar">
+      <div class="modes" id="modes" role="radiogroup" aria-label="Schedule to play"></div>
+      <span class="pathinfo" id="pathInfo"></span>
+    </div>
+    <div class="tree" id="tree"></div>
+    <details class="tags"><summary>Show the tagged trace</summary><pre id="tagged"></pre></details>
+  </section>
+
+  <section class="panel">
+    <div class="head"><h2>Ablation</h2></div>
+    <p class="blurb" id="ablBlurb"></p>
+    <div class="runs" id="runs"></div>
+    <div class="axis" id="axis"></div>
+    <div class="axis-cap">decoding steps (tokens) →</div>
+    <div class="legend">
+      <span><i style="--c:var(--neutral)"></i>plan / final conclusion</span>
+      <span><i style="--c:var(--sub)"></i>subtask thread</span>
+      <span><i style="--c:var(--trial)"></i>trial, root found</span>
+      <span><i class="dead"></i>trial, dead end</span>
+      <span><i class="crit"></i>sets the latency</span>
+    </div>
+  </section>
+
+  <section class="panel" style="gap:12px">
+    <h2 style="font-size:18px">What each fork buys here</h2>
+    <div class="compare">
+      <div><h3 class="s">Subtask · AND</h3><p>The two cubics don't depend on each other and both roots are needed, so they decode side by side and the join waits for the slower one. Alone, this saves <b data-stat="sub"></b>.</p></div>
+      <div><h3 class="t">Trial · OR</h3><p>Neither root is known, so five candidates are tested at once. Only one hits, but all five results join the context. Alone, this saves <b data-stat="tri"></b>.</p></div>
+      <div><h3>Both, nested</h3><p>Two subtasks of five trials each run as ten threads at the peak. Together they save <b data-stat="both"></b>.</p></div>
+    </div>
+    <p class="note">Token counts are illustrative. Latency is the number of tokens on the critical path, and speedup is sequential tokens divided by that latency. This ablation changes which forks run concurrently on one fixed trace. The paper's PA-GRPO ablation changes the reward weights for each fork type, which changes the traces the model writes.</p>
+  </section>
+</div>
+
+<script>
+// ---- the trace ------------------------------------------------------------
+const LEAVES = {
+  pre:    {len:12, kind:"think", label:"Plan + subtask outlines",     text:"Two independent equations. Solve each as a subtask, then combine."},
+  s1pre:  {len:6,  kind:"sub",   label:"Subtask 1 · trial outlines",  text:"Rational roots divide 4. Test candidates:"},
+  t11:    {len:14, kind:"trial", ok:false, goal:"x = 1",  label:"Subtask 1 · trial x = 1",  text:"1 − 2 − 4 = −5. Not a root."},
+  t12:    {len:14, kind:"trial", ok:false, goal:"x = −1", label:"Subtask 1 · trial x = −1", text:"−1 + 2 − 4 = −3. Not a root."},
+  t13:    {len:18, kind:"trial", ok:true,  goal:"x = 2",  label:"Subtask 1 · trial x = 2",  text:"8 − 4 − 4 = 0. Root! x² + 2x + 2 has no real roots."},
+  t14:    {len:14, kind:"trial", ok:false, goal:"x = −2", label:"Subtask 1 · trial x = −2", text:"−8 + 4 − 4 = −8. Not a root."},
+  t15:    {len:14, kind:"trial", ok:false, goal:"x = 4",  label:"Subtask 1 · trial x = 4",  text:"64 − 8 − 4 = 52. Not a root."},
+  s1post: {len:4,  kind:"sub",   label:"Subtask 1 · conclusion",      text:"So a = 2."},
+  s2pre:  {len:6,  kind:"sub",   label:"Subtask 2 · trial outlines",  text:"Rational roots divide 30. Test candidates:"},
+  t21:    {len:14, kind:"trial", ok:false, goal:"x = 1", label:"Subtask 2 · trial x = 1", text:"1 + 1 − 30 = −28. Not a root."},
+  t22:    {len:16, kind:"trial", ok:false, goal:"x = 2", label:"Subtask 2 · trial x = 2", text:"8 + 2 − 30 = −20. Not a root."},
+  t23:    {len:20, kind:"trial", ok:true,  goal:"x = 3", label:"Subtask 2 · trial x = 3", text:"27 + 3 − 30 = 0. Root! x² + 3x + 10 has no real roots."},
+  t24:    {len:16, kind:"trial", ok:false, goal:"x = 5", label:"Subtask 2 · trial x = 5", text:"125 + 5 − 30 = 100. Not a root."},
+  t25:    {len:16, kind:"trial", ok:false, goal:"x = 6", label:"Subtask 2 · trial x = 6", text:"216 + 6 − 30 = 192. Not a root."},
+  s2post: {len:4,  kind:"sub",   label:"Subtask 2 · conclusion",      text:"So b = 3."},
+  comb:   {len:12, kind:"think", label:"Final conclusion",            text:"a^b + b^a = 2^3 + 3^2 = 8 + 9 = 17."},
+};
+const SUBS = {
+  1:{goal:"real root a of x³ − 2x − 4 = 0", trials:["t11","t12","t13","t14","t15"], slot:["a = ?","a = 2"]},
+  2:{goal:"real root b of x³ + x − 30 = 0", trials:["t21","t22","t23","t24","t25"], slot:["b = ?","b = 3"]},
+};
+const L = k => ({leaf:k});
+const TRACE = {seq:[
+  L("pre"),
+  {par:"subtask", kids:[1,2].map(i => ({seq:[L(`s${i}pre`), {par:"trial", kids:SUBS[i].trials.map(k => L(k))}, L(`s${i}post`)]}))},
+  L("comb"),
+]};
+
+// ---- schedules: which fork types may run concurrently ----------------------
+const MODES = [
+  {id:"seq",  name:"Sequential",      on:{subtask:false, trial:false}, desc:"One thread decodes everything in order, like a plain chain of thought."},
+  {id:"sub",  name:"Subtask only",    on:{subtask:true,  trial:false}, desc:"Two threads: the cubics decode side by side, and each tests its candidates in turn."},
+  {id:"tri",  name:"Trial only",      on:{subtask:false, trial:true},  desc:"Five threads: candidates are tested side by side, and the cubics are solved in turn."},
+  {id:"both", name:"Subtask + Trial", on:{subtask:true,  trial:true},  desc:"Ten threads at the peak: both forks run concurrently."},
+];
+const sum = a => a.reduce((s, v) => s + v, 0);
+function dur(n, on){
+  if (n.leaf) return LEAVES[n.leaf].len;
+  if (n.seq) return sum(n.seq.map(c => dur(c, on)));
+  const d = n.kids.map(c => dur(c, on));
+  return on[n.par] ? Math.max(...d) : sum(d);
+}
+function width(n, on){
+  if (n.leaf) return 1;
+  if (n.seq) return Math.max(...n.seq.map(c => width(c, on)));
+  const w = n.kids.map(c => width(c, on));
+  return on[n.par] ? sum(w) : Math.max(...w);
+}
+// Assigns each leaf a start time and a lane band; marks leaves on the critical path inside parallel forks.
+function sched(n, t0, lane, span, on, out, crit, inPar){
+  if (n.leaf){ const len = LEAVES[n.leaf].len; out[n.leaf] = {start:t0, len, lane, span, crit:crit && inPar}; return t0 + len; }
+  if (n.seq){ let t = t0; for (const c of n.seq) t = sched(c, t, lane, span, on, out, crit, inPar); return t; }
+  if (!on[n.par]){ let t = t0; for (const c of n.kids) t = sched(c, t, lane, span, on, out, crit, inPar); return t; }
+  const d = n.kids.map(c => dur(c, on)), top = d.indexOf(Math.max(...d));
+  let l = lane, end = t0;
+  n.kids.forEach((c, i) => { const w = width(c, on); end = Math.max(end, sched(c, t0, l, w, on, out, crit && i === top, true)); l += w; });
+  return end;
+}
+MODES.forEach(m => { m.W = width(TRACE, m.on); m.S = {}; m.lat = sched(TRACE, 0, 0, m.W, m.on, m.S, true, false); });
+const SEQ = MODES[0].lat;
+const pct = v => (v / SEQ * 100) + "%";
+const clamp = v => Math.max(0, Math.min(1, v));
+const speedup = m => (SEQ / m.lat).toFixed(2) + "×";
+
+// ---- build the tree -------------------------------------------------------
+const treeEl = document.getElementById("tree");
+const subHTML = i => `
+  <div class="subcard" data-sub="${i}">
+    <div class="sub-head"><span class="sgoal"><span class="tag">&lt;Subtask&gt; ${i}</span> ${SUBS[i].goal}</span><span class="status"></span></div>
+    <div class="line" data-k="s${i}pre"><span class="txt"></span></div>
+    <div class="trials">
+      <div class="trial-lab">Trial fork · OR</div>
+      ${SUBS[i].trials.map(k => `
+      <div class="trial ${LEAVES[k].ok ? "hit" : "dead"}" data-k="${k}">
+        <span class="tgoal">${LEAVES[k].goal}</span><span class="txt"></span><span class="badge"></span><span class="bar"><i></i></span>
+      </div>`).join("")}
+    </div>
+    <div class="line" data-k="s${i}post"><span class="tag">&lt;Conclusion&gt;</span> <span class="txt"></span></div>
+  </div>`;
+treeEl.innerHTML = `
+  <div class="node" data-k="pre">
+    <div class="lab"><span>&lt;think&gt; plan + &lt;Outlines&gt;</span><span class="status"></span></div>
+    <div class="txt"></div>
+  </div>
+  <div class="fork down"><span>Subtask fork · AND</span></div>
+  <div class="subs">${subHTML(1)}${subHTML(2)}</div>
+  <div class="fork up"><span>join needs a and b</span></div>
+  <div class="node" data-k="comb">
+    <div class="lab"><span>&lt;Conclusion&gt; combine</span><span class="status"></span></div>
+    <div class="slots"><span class="slot"></span><span class="slot"></span></div>
+    <div class="txt"></div>
+    <div class="answer"></div>
+  </div>`;
+const tq = k => treeEl.querySelector(`[data-k="${k}"]`);
+const subCards = {1:treeEl.querySelector('[data-sub="1"]'), 2:treeEl.querySelector('[data-sub="2"]')};
+const slotEls = [...treeEl.querySelectorAll(".slot")];
+
+// tagged trace in Parason format
+(function(){
+  const T = (n, c = "tc") => `<span class="${c}">&lt;${n}&gt;</span>`, I = "  ";
+  const out = [T("think"), LEAVES.pre.text, T("Parallel"), T("Outlines")];
+  [1,2].forEach(i => out.push(`${T("Subtask","ts")}${i}: ${SUBS[i].goal}${T("/Subtask","ts")}`));
+  out.push(T("/Outlines"));
+  [1,2].forEach(i => {
+    const tr = SUBS[i].trials;
+    out.push(`${T("Thread")}${i}: ${LEAVES[`s${i}pre`].text}`, I + T("Parallel"), I + T("Outlines"));
+    tr.forEach((k, j) => out.push(`${I}${T("Trial","tt")}${j+1}: ${LEAVES[k].goal}${T("/Trial","tt")}`));
+    out.push(I + T("/Outlines"));
+    tr.forEach((k, j) => out.push(`${I}${T("Thread")}${j+1}: ${LEAVES[k].text}${T("/Thread")}`));
+    out.push(`${I}${T("Conclusion")}${LEAVES[`s${i}post`].text}${T("/Conclusion")}`, I + T("/Parallel"), T("/Thread"));
+  });
+  out.push(`${T("Conclusion")}${LEAVES.comb.text}${T("/Conclusion")}`, T("/Parallel"), T("/think"), "The answer is \\boxed{17}.");
+  document.getElementById("tagged").innerHTML = out.join("\n");
+})();
+
+// ---- build the ablation rows ----------------------------------------------
+const LH = 11, G = 2;
+const runsEl = document.getElementById("runs");
+const segColor = Lf => Lf.kind === "think" ? "var(--neutral)" : Lf.kind === "sub" ? "var(--sub)" : "var(--trial)";
+MODES.forEach(m => {
+  const H = m.W * LH + (m.W - 1) * G;
+  const segs = Object.entries(m.S).map(([k, s]) => {
+    const Lf = LEAVES[k];
+    const cls = ["seg", Lf.kind === "trial" && !Lf.ok ? "dead" : "", s.crit ? "crit" : ""].join(" ").trim();
+    return `<div class="${cls}" data-k="${k}" title="${Lf.label} · ${Lf.len} tok" style="--c:${segColor(Lf)};left:${pct(s.start)};width:${pct(s.len)};top:${s.lane * (LH + G)}px;height:${s.span * LH + (s.span - 1) * G}px"><i></i></div>`;
+  }).join("");
+  const saved = SEQ - m.lat;
+  const row = document.createElement("div");
+  row.className = "run";
+  row.tabIndex = 0;
+  row.setAttribute("role", "button");
+  row.setAttribute("aria-label", `Play the ${m.name} schedule in the trace`);
+  row.innerHTML = `
+    <div class="run-head"><span class="run-name">${m.name}</span><span class="run-desc">${m.desc}</span>
+      <span class="run-val"><b>${m.lat}</b> tok · <b>${m.id === "seq" ? "baseline" : speedup(m)}</b></span></div>
+    <div class="track" style="height:${H}px;background-size:${pct(20)} 100%">${segs}
+      ${saved ? `<div class="save" style="left:${pct(m.lat)};width:${pct(saved)}">−${saved} tok</div>` : ""}
+      <div class="head-line"></div>
+    </div>`;
+  runsEl.appendChild(row);
+  m.el = {row, head:row.querySelector(".head-line"), segs:[...row.querySelectorAll(".seg")]};
+  row.addEventListener("click", () => setMode(m.id, true));
+  row.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " "){ e.preventDefault(); setMode(m.id, true); } });
+});
+const axisEl = document.getElementById("axis");
+for (let v = 0; v <= SEQ; v += 20) axisEl.insertAdjacentHTML("beforeend", `<span style="left:${pct(v)}">${v}</span>`);
+document.getElementById("ablBlurb").textContent =
+  `The same trace, with the same ${SEQ} tokens of work, scheduled four ways. Letting a fork type run in parallel lets its threads decode at the same time, which shortens the critical path. Click a row to play that schedule in the trace above.`;
+document.querySelectorAll("[data-stat]").forEach(el => {
+  const m = MODES.find(x => x.id === el.dataset.stat);
+  el.textContent = `${SEQ - m.lat} of ${SEQ} tokens (${speedup(m)})`;
+});
+
+// ---- rendering --------------------------------------------------------------
+function typeInto(el, text, p){
+  const live = p > 0 && p < 1, n = Math.round(text.length * p), key = n + (live ? "c" : "");
+  if (el.dataset.key === key) return;
+  el.dataset.key = key;
+  el.textContent = text.slice(0, n);
+  if (live){ const c = document.createElement("span"); c.className = "cur"; el.appendChild(c); }
+}
+const setText = (el, s) => { if (el.textContent !== s) el.textContent = s; };
+const setLive = (el, p) => { el.classList.toggle("live", p > 0 && p < 1); el.classList.toggle("done", p >= 1); };
+const stateOf = p => p <= 0 ? "waiting" : p >= 1 ? "done" : "decoding";
+
+function renderTree(t){
+  const S = MODE.S, P = k => clamp((t - S[k].start) / S[k].len);
+  const pre = P("pre"), preEl = tq("pre");
+  setLive(preEl, pre); setText(preEl.querySelector(".status"), stateOf(pre));
+  typeInto(preEl.querySelector(".txt"), LEAVES.pre.text, pre);
+  [1,2].forEach(i => {
+    const card = subCards[i], kp = `s${i}pre`, kc = `s${i}post`, pp = P(kp);
+    card.querySelector(".sgoal").classList.toggle("pending", pre < (i === 1 ? .6 : .9));
+    [kp, kc].forEach(k => { const el = tq(k), p = P(k); setLive(el, p); typeInto(el.querySelector(".txt"), LEAVES[k].text, p); });
+    SUBS[i].trials.forEach((k, j) => {
+      const el = tq(k), p = P(k), Lf = LEAVES[k];
+      setLive(el, p);
+      el.querySelector(".tgoal").classList.toggle("pending", pp < (j + 1) / (SUBS[i].trials.length + 1));
+      typeInto(el.querySelector(".txt"), Lf.text, p);
+      el.querySelector(".bar i").style.width = p * 100 + "%";
+      setText(el.querySelector(".badge"), p >= 1 ? (Lf.ok ? "✓ root" : "✗") : "");
+    });
+    const ps = [kp, ...SUBS[i].trials, kc].map(P);
+    const st = ps.every(v => v >= 1) ? "done" : ps.some(v => v > 0 && v < 1) ? "decoding" : "waiting";
+    card.classList.toggle("active", st === "decoding");
+    setText(card.querySelector(".sub-head .status"), st);
+  });
+  const a = P("s1post") >= 1, b = P("s2post") >= 1, pc = P("comb"), cEl = tq("comb");
+  setLive(cEl, pc);
+  setText(slotEls[0], SUBS[1].slot[+a]); slotEls[0].classList.toggle("in", a);
+  setText(slotEls[1], SUBS[2].slot[+b]); slotEls[1].classList.toggle("in", b);
+  setText(cEl.querySelector(".status"), pc > 0 ? stateOf(pc) : a && !b ? "waiting for b" : b && !a ? "waiting for a" : "waiting");
+  typeInto(cEl.querySelector(".txt"), LEAVES.comb.text, pc);
+  const ans = cEl.querySelector(".answer"), want = pc >= 1 ? "1" : "";
+  if (ans.dataset.v !== want){ ans.dataset.v = want; ans.innerHTML = want ? 'Answer<span class="boxed">17</span>' : ""; }
+}
+function renderRuns(t){
+  MODES.forEach(m => {
+    m.el.segs.forEach(seg => { const s = m.S[seg.dataset.k]; seg.firstElementChild.style.width = clamp((t - s.start) / s.len) * 100 + "%"; });
+    m.el.head.style.left = pct(Math.min(t, m.lat));
+    m.el.row.classList.toggle("done", t >= m.lat);
+  });
+}
+function render(t){
+  renderTree(t); renderRuns(t);
+  setText(clockEl, `t = ${Math.floor(Math.min(t, SEQ))} tok`);
+  scrub.value = Math.round(t / END * 1000);
+}
+
+// ---- mode selection ---------------------------------------------------------
+const modesEl = document.getElementById("modes"), pathInfo = document.getElementById("pathInfo");
+modesEl.innerHTML = MODES.map(m => `<button type="button" role="radio" aria-checked="false" data-mode="${m.id}">${m.name}</button>`).join("");
+const modeBtns = [...modesEl.querySelectorAll("button")];
+modeBtns.forEach(btn => btn.addEventListener("click", () => setMode(btn.dataset.mode, true)));
+let MODE = MODES[3];
+function setMode(id, replay){
+  MODE = MODES.find(m => m.id === id);
+  modeBtns.forEach(btn => btn.setAttribute("aria-checked", String(btn.dataset.mode === id)));
+  MODES.forEach(m => m.el.row.classList.toggle("sel", m === MODE));
+  pathInfo.innerHTML = `critical path <b>${MODE.lat}</b> of ${SEQ} tok · <b>${speedup(MODE)}</b>`;
+  if (replay){ t = 0; setPlaying(true); }   // a click replays the chosen schedule from the first token
+  render(t);
+}
+
+// hovering a thread highlights it in the tree and in every schedule
+let hlKey = null;
+document.addEventListener("mouseover", e => {
+  const el = e.target.closest("[data-k]"), k = el ? el.dataset.k : null;
+  if (k === hlKey) return;
+  if (hlKey) document.querySelectorAll(`[data-k="${hlKey}"]`).forEach(x => x.classList.remove("hl"));
+  hlKey = k;
+  if (k) document.querySelectorAll(`[data-k="${k}"]`).forEach(x => x.classList.add("hl"));
+});
+
+// ---- clock ------------------------------------------------------------------
+const playBtn = document.getElementById("play"), scrub = document.getElementById("scrub"),
+      speedSel = document.getElementById("speed"), clockEl = document.getElementById("clock");
+const TOK_PER_S = 12, HOLD = 30, END = SEQ + HOLD;
+const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+let t = reduce ? SEQ : 0, playing = !reduce, last = null;
+function frame(now){
+  if (playing){
+    if (last != null) t += (now - last) / 1000 * TOK_PER_S * +speedSel.value;
+    if (t >= END) t = 0;
+    render(t);
+  }
+  last = now;
+  requestAnimationFrame(frame);
+}
+function setPlaying(v){ playing = v; playBtn.textContent = v ? "Pause" : "Play"; last = null; }
+playBtn.addEventListener("click", () => { if (!playing && t >= SEQ) t = 0; setPlaying(!playing); });
+document.getElementById("restart").addEventListener("click", () => { t = 0; render(t); setPlaying(true); });
+scrub.addEventListener("input", () => { setPlaying(false); t = scrub.value / 1000 * END; render(t); });
+setPlaying(playing);
+setMode(MODE.id);
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
